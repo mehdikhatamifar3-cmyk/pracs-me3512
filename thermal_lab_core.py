@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Iterable
 
@@ -46,22 +47,22 @@ def blank_conduction_data() -> pd.DataFrame:
     for material in ("Brass", "Aluminium"):
         for trial, voltage in enumerate((7.0, 10.0), start=1):
             row = {column: np.nan for column in CONDUCTION_COLUMNS}
-            row.update({"Material": material, "Trial": trial, "Voltage_V": voltage})
+            row.update({"Material": material, "Trial": str(trial), "Voltage_V": voltage})
             rows.append(row)
-    return pd.DataFrame(rows, columns=CONDUCTION_COLUMNS)
+    return normalise_conduction_data(pd.DataFrame(rows, columns=CONDUCTION_COLUMNS))
 
 
 def demonstration_conduction_data() -> pd.DataFrame:
     """Data transcribed from the supplied 2021 high-mark sample report."""
     rows = [
-        ["Brass", 1, 7.6, 0.73, 0.64, 55.0, 54.0, 53.0, 49.3, 48.0, 25.2, 24.3, 24.5],
-        ["Brass", 2, 9.6, 0.96, 0.64, 77.8, 76.1, 74.7, 68.4, 66.7, 25.2, 25.0, 24.9],
-        ["Brass", 3, 12.5, 1.25, 0.58, 93.1, 90.5, 88.2, 82.8, 80.8, 27.0, 25.7, 25.3],
-        ["Aluminium", 1, 7.6, 0.72, 0.64, 51.8, 50.5, 49.1, 42.8, 41.9, 27.5, 25.9, 25.5],
-        ["Aluminium", 2, 9.6, 0.94, 0.64, 62.1, 60.1, 58.1, 48.6, 47.2, 29.4, 27.3, 26.3],
-        ["Aluminium", 3, 12.5, 1.25, 0.58, 71.8, 68.7, 65.7, 60.9, 58.5, 31.5, 28.8, 27.2],
+        ["Brass", "1", 7.6, 0.73, 0.64, 55.0, 54.0, 53.0, 49.3, 48.0, 25.2, 24.3, 24.5],
+        ["Brass", "2", 9.6, 0.96, 0.64, 77.8, 76.1, 74.7, 68.4, 66.7, 25.2, 25.0, 24.9],
+        ["Brass", "3", 12.5, 1.25, 0.58, 93.1, 90.5, 88.2, 82.8, 80.8, 27.0, 25.7, 25.3],
+        ["Aluminium", "1", 7.6, 0.72, 0.64, 51.8, 50.5, 49.1, 42.8, 41.9, 27.5, 25.9, 25.5],
+        ["Aluminium", "2", 9.6, 0.94, 0.64, 62.1, 60.1, 58.1, 48.6, 47.2, 29.4, 27.3, 26.3],
+        ["Aluminium", "3", 12.5, 1.25, 0.58, 71.8, 68.7, 65.7, 60.9, 58.5, 31.5, 28.8, 27.2],
     ]
-    return pd.DataFrame(rows, columns=CONDUCTION_COLUMNS)
+    return normalise_conduction_data(pd.DataFrame(rows, columns=CONDUCTION_COLUMNS))
 
 
 def blank_radiation_data() -> pd.DataFrame:
@@ -71,7 +72,7 @@ def blank_radiation_data() -> pd.DataFrame:
         ["3 - forced, exposed", "On", "Down (exposed)", 4.0, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["4 - forced, shielded", "On", "Up (shielded)", 4.0, np.nan, np.nan, np.nan, np.nan, np.nan],
     ]
-    return pd.DataFrame(rows, columns=RADIATION_COLUMNS)
+    return normalise_radiation_data(pd.DataFrame(rows, columns=RADIATION_COLUMNS))
 
 
 def demonstration_radiation_data() -> pd.DataFrame:
@@ -82,7 +83,91 @@ def demonstration_radiation_data() -> pd.DataFrame:
         ["3 - forced, exposed", "On", "Down (exposed)", 4.0, 22.95, 24.95, 24.95, 25.05, 72.25],
         ["4 - forced, shielded", "On", "Up (shielded)", 4.0, 22.95, 24.75, 25.55, 24.75, 68.05],
     ]
-    return pd.DataFrame(rows, columns=RADIATION_COLUMNS)
+    return normalise_radiation_data(pd.DataFrame(rows, columns=RADIATION_COLUMNS))
+
+
+def normalise_conduction_data(data: pd.DataFrame) -> pd.DataFrame:
+    """Return the stable dtypes expected by Streamlit's data editor."""
+    table = data.reindex(columns=CONDUCTION_COLUMNS).copy()
+    table["Material"] = table["Material"].astype("string")
+    table["Trial"] = table["Trial"].astype("string")
+    for column in CONDUCTION_COLUMNS[2:]:
+        table[column] = pd.to_numeric(table[column], errors="coerce").astype(float)
+    return table
+
+
+def normalise_radiation_data(data: pd.DataFrame) -> pd.DataFrame:
+    """Return the stable dtypes expected by Streamlit's data editor."""
+    table = data.reindex(columns=RADIATION_COLUMNS).copy()
+    for column in ("Case", "Fan", "Shield"):
+        table[column] = table[column].astype("string")
+    for column in RADIATION_COLUMNS[3:]:
+        table[column] = pd.to_numeric(table[column], errors="coerce").astype(float)
+    return table
+
+
+def _online_variant(student_key: str, practical_tag: str) -> int:
+    identity = (student_key or "unassigned").strip().lower()
+    digest = hashlib.sha256(f"ME3512_THERMALLAB_2026::{practical_tag}::{identity}".encode("utf-8")).digest()
+    return digest[0] % 4
+
+
+def assigned_online_conduction_data(student_key: str) -> pd.DataFrame:
+    """Create one of four stable, physically consistent online HT11C datasets."""
+    table = demonstration_conduction_data().copy()
+    variant = _online_variant(student_key, "conduction")
+    gradient_scale = (0.985, 1.000, 1.015, 1.030)[variant]
+    ambient_shift = (-0.6, 0.0, 0.5, 0.9)[variant]
+    sensor_noise = np.array(
+        [
+            [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
+            [0.08, -0.04, 0.05, -0.05, 0.03, 0.04, -0.03, 0.01],
+            [-0.06, 0.06, -0.03, 0.08, -0.05, 0.03, 0.05, -0.04],
+            [0.10, 0.02, -0.07, -0.04, 0.07, -0.02, -0.06, 0.03],
+        ]
+    )[variant]
+    temperature_columns = [f"T{i}_C" for i in range(1, 9)]
+    for row_index in table.index:
+        base = table.loc[row_index, temperature_columns].astype(float).to_numpy()
+        cold_reference = base[-1]
+        adjusted = cold_reference + ambient_shift + gradient_scale * (base - cold_reference) + sensor_noise
+        table.loc[row_index, temperature_columns] = np.round(adjusted, 2)
+    table["Current_A"] = np.round(table["Current_A"] * gradient_scale, 3)
+    table["Water_flow_L_min"] = np.round(table["Water_flow_L_min"] + (variant - 1.5) * 0.01, 2)
+    return normalise_conduction_data(table)
+
+
+def assigned_online_radiation_data(student_key: str) -> pd.DataFrame:
+    """Create one of four stable online HT16C datasets for a student."""
+    table = demonstration_radiation_data().copy()
+    variant = _online_variant(student_key, "radiation")
+    ambient_shift = (-0.5, 0.0, 0.4, 0.8)[variant]
+    wall_scale = (0.980, 1.000, 1.020, 1.035)[variant]
+    bias_scale = (0.970, 1.000, 1.030, 1.050)[variant]
+    bead_noise = np.array(
+        [
+            [0.00, 0.00, 0.00],
+            [0.04, -0.03, 0.02],
+            [-0.03, 0.05, -0.02],
+            [0.05, 0.01, -0.04],
+        ]
+    )[variant]
+    bead_columns = ["T7_polished_C", "T8_small_black_C", "T9_large_black_C"]
+    for row_index in table.index:
+        base_air = float(table.loc[row_index, "T6_air_C"])
+        assigned_air = base_air + ambient_shift
+        table.loc[row_index, "T6_air_C"] = round(assigned_air, 2)
+        table.loc[row_index, "T10_wall_C"] = round(
+            assigned_air + (float(table.loc[row_index, "T10_wall_C"]) - base_air) * wall_scale,
+            2,
+        )
+        for bead_index, column in enumerate(bead_columns):
+            base_bias = float(table.loc[row_index, column]) - base_air
+            table.loc[row_index, column] = round(assigned_air + base_bias * bias_scale + bead_noise[bead_index], 2)
+    forced = table["Air_velocity_m_s"] > 0
+    velocity_scale = (0.96, 1.00, 1.04, 1.02)[variant]
+    table.loc[forced, "Air_velocity_m_s"] = np.round(table.loc[forced, "Air_velocity_m_s"] * velocity_scale, 2)
+    return normalise_radiation_data(table)
 
 
 def _numeric_row(row: pd.Series, columns: Iterable[str]) -> bool:
@@ -328,4 +413,3 @@ def equilibrium_sensor_temperature_C(
         else:
             lower = midpoint
     return 0.5 * (lower + upper) - 273.15
-
