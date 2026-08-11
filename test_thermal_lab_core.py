@@ -4,6 +4,9 @@ import unittest
 from thermal_lab_core import (
     analyse_conduction,
     analyse_radiation,
+    assigned_online_conduction_data,
+    assigned_online_radiation_data,
+    blank_conduction_data,
     demonstration_conduction_data,
     demonstration_radiation_data,
     equilibrium_sensor_temperature_C,
@@ -13,6 +16,26 @@ from thermal_lab_core import (
 
 
 class ThermalLabCoreTests(unittest.TestCase):
+    def test_streamlit_editor_dtypes_are_stable(self):
+        blank = blank_conduction_data()
+        demonstration = demonstration_conduction_data()
+        self.assertEqual(str(blank["Trial"].dtype), "string")
+        self.assertEqual(str(demonstration["Trial"].dtype), "string")
+        self.assertTrue(all(str(blank[column].dtype) == "float64" for column in blank.columns[2:]))
+
+    def test_online_assignments_are_stable_and_student_specific(self):
+        first = assigned_online_conduction_data("12345678")
+        repeat = assigned_online_conduction_data("12345678")
+        second = assigned_online_conduction_data("87654321")
+        self.assertTrue(first.equals(repeat))
+        self.assertFalse(first.equals(second))
+        self.assertEqual(len(analyse_conduction(first)), 6)
+
+        radiation_first = assigned_online_radiation_data("12345678")
+        radiation_repeat = assigned_online_radiation_data("12345678")
+        self.assertTrue(radiation_first.equals(radiation_repeat))
+        self.assertEqual(len(analyse_radiation(radiation_first)), 4)
+
     def test_supplied_conduction_example_recalculates_from_raw_values(self):
         data = demonstration_conduction_data()
         analysed = analyse_conduction(data, diameter_mm=25.0, heat_rate_fraction=1.0)
@@ -23,6 +46,32 @@ class ThermalLabCoreTests(unittest.TestCase):
         self.assertAlmostEqual(brass_12_5["Cold_bar_face_C"], 27.3, delta=0.08)
         self.assertAlmostEqual(brass_12_5["Hot_contact_Rpp_m2K_W"], 9.817e-5, delta=9.817e-5 * 0.02)
         self.assertAlmostEqual(brass_12_5["Cold_contact_Rpp_m2K_W"], 1.650e-3, delta=1.650e-3 * 0.02)
+
+    def test_contact_temperatures_match_the_three_fitted_lines(self):
+        analysed = analyse_conduction(demonstration_conduction_data())
+        row = analysed.iloc[0]
+        hot_interface = 0.0375
+        cold_interface = 0.0675
+        self.assertAlmostEqual(
+            row["Hot_bar_face_C"],
+            row["Hot_slope_K_m"] * hot_interface + row["Hot_intercept_C"],
+            places=10,
+        )
+        self.assertAlmostEqual(
+            row["Sample_hot_face_C"],
+            row["Sample_slope_K_m"] * hot_interface + row["Sample_intercept_C"],
+            places=10,
+        )
+        self.assertAlmostEqual(
+            row["Sample_cold_face_C"],
+            row["Sample_slope_K_m"] * cold_interface + row["Sample_intercept_C"],
+            places=10,
+        )
+        self.assertAlmostEqual(
+            row["Cold_bar_face_C"],
+            row["Cold_slope_K_m"] * cold_interface + row["Cold_intercept_C"],
+            places=10,
+        )
 
     def test_forced_convection_h_tracks_supplied_theoretical_scale(self):
         h_small, re_small, _ = forced_convection_h(4.0, 0.5)
