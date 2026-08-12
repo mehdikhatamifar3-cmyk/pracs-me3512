@@ -99,14 +99,14 @@ def _modelled_conduction_row(
 
 
 def demonstration_conduction_data() -> pd.DataFrame:
-    """Controlled teaching data with realistic k values and visible contact jumps."""
+    """Controlled teaching data with realistic k and deliberately asymmetric contacts."""
     specifications = [
-        ("Brass", "1", 7.0, 0.70, 1.50, 116.0, 1.80e-4, 2.50e-4, 24.6),
-        ("Brass", "2", 10.0, 1.00, 1.50, 119.0, 1.60e-4, 2.30e-4, 25.0),
-        ("Brass", "3", 12.0, 1.25, 1.45, 122.0, 1.45e-4, 2.10e-4, 25.5),
-        ("Aluminium", "1", 7.0, 0.70, 1.50, 174.0, 2.10e-4, 2.80e-4, 24.6),
-        ("Aluminium", "2", 10.0, 1.00, 1.50, 180.0, 1.90e-4, 2.55e-4, 25.0),
-        ("Aluminium", "3", 12.0, 1.25, 1.45, 186.0, 1.70e-4, 2.30e-4, 25.5),
+        ("Brass", "1", 7.0, 0.70, 1.50, 116.0, 1.30e-4, 4.20e-4, 24.6),
+        ("Brass", "2", 10.0, 1.00, 1.50, 119.0, 1.20e-4, 3.80e-4, 25.0),
+        ("Brass", "3", 12.0, 1.25, 1.45, 122.0, 1.10e-4, 3.40e-4, 25.5),
+        ("Aluminium", "1", 7.0, 0.70, 1.50, 174.0, 1.60e-4, 4.80e-4, 24.6),
+        ("Aluminium", "2", 10.0, 1.00, 1.50, 180.0, 1.45e-4, 4.40e-4, 25.0),
+        ("Aluminium", "3", 12.0, 1.25, 1.45, 186.0, 1.30e-4, 4.00e-4, 25.5),
     ]
     rows = [_modelled_conduction_row(*specification) for specification in specifications]
     return normalise_conduction_data(pd.DataFrame(rows, columns=CONDUCTION_COLUMNS))
@@ -122,14 +122,42 @@ def blank_radiation_data() -> pd.DataFrame:
     return normalise_radiation_data(pd.DataFrame(rows, columns=RADIATION_COLUMNS))
 
 
-def demonstration_radiation_data() -> pd.DataFrame:
-    """Data transcribed from the supplied 2021 high-mark sample report."""
-    rows = [
-        ["1 - natural, exposed", "Off", "Down (exposed)", 0.0, 23.05, 32.35, 34.75, 33.15, 118.95],
-        ["2 - natural, shielded", "Off", "Up (shielded)", 0.0, 24.15, 28.85, 32.95, 29.35, 122.45],
-        ["3 - forced, exposed", "On", "Down (exposed)", 4.0, 22.95, 24.95, 24.95, 25.05, 72.25],
-        ["4 - forced, shielded", "On", "Up (shielded)", 4.0, 22.95, 24.75, 25.55, 24.75, 68.05],
+def _radiation_case_specifications() -> list[tuple[object, ...]]:
+    """Return controlled cases and the effective surroundings seen by the beads."""
+    return [
+        # case, fan, shield, velocity, air, heated wall, effective Tsur, h(0.5 mm), h(3 mm)
+        ("1 - natural, exposed", "Off", "Down (exposed)", 0.0, 23.5, 120.0, 120.0, 70.0, 35.0),
+        ("2 - natural, shielded", "Off", "Up (shielded)", 0.0, 23.8, 121.0, 36.0, 70.0, 35.0),
+        ("3 - forced, exposed", "On", "Down (exposed)", 4.0, 23.7, 80.0, 80.0, np.nan, np.nan),
+        ("4 - forced, shielded", "On", "Up (shielded)", 4.0, 23.9, 79.0, 32.0, np.nan, np.nan),
     ]
+
+
+def _modelled_radiation_row(specification: tuple[object, ...]) -> list[object]:
+    case, fan, shield, velocity, air, wall, effective_surrounding, h_small, h_large = specification
+    velocity = float(velocity)
+    if velocity > 0:
+        h_small = forced_convection_h(velocity, 0.5)[0]
+        h_large = forced_convection_h(velocity, 3.0)[0]
+    bead_temperatures = [
+        equilibrium_sensor_temperature_C(float(air), float(effective_surrounding), float(h_small), 0.17),
+        equilibrium_sensor_temperature_C(float(air), float(effective_surrounding), float(h_small), 0.98),
+        equilibrium_sensor_temperature_C(float(air), float(effective_surrounding), float(h_large), 0.98),
+    ]
+    return [
+        case,
+        fan,
+        shield,
+        velocity,
+        float(air),
+        *(round(value, 2) for value in bead_temperatures),
+        float(wall),
+    ]
+
+
+def demonstration_radiation_data() -> pd.DataFrame:
+    """Controlled energy-balance data that isolate emissivity, size, shielding and airflow."""
+    rows = [_modelled_radiation_row(specification) for specification in _radiation_case_specifications()]
     return normalise_radiation_data(pd.DataFrame(rows, columns=RADIATION_COLUMNS))
 
 
@@ -185,12 +213,13 @@ def assigned_online_conduction_data(student_key: str) -> pd.DataFrame:
 
 
 def assigned_online_radiation_data(student_key: str) -> pd.DataFrame:
-    """Create one of four stable online HT16C datasets for a student."""
-    table = demonstration_radiation_data().copy()
+    """Create one of four stable, energy-balance-consistent online HT16C datasets."""
     variant = _online_variant(student_key, "radiation")
     ambient_shift = (-0.5, 0.0, 0.4, 0.8)[variant]
     wall_scale = (0.980, 1.000, 1.020, 1.035)[variant]
-    bias_scale = (0.970, 1.000, 1.030, 1.050)[variant]
+    h_scale = (1.035, 1.000, 0.975, 0.950)[variant]
+    shield_scale = (0.96, 1.00, 1.04, 1.06)[variant]
+    velocity_scale = (0.96, 1.00, 1.04, 1.02)[variant]
     bead_noise = np.array(
         [
             [0.00, 0.00, 0.00],
@@ -199,21 +228,41 @@ def assigned_online_radiation_data(student_key: str) -> pd.DataFrame:
             [0.05, 0.01, -0.04],
         ]
     )[variant]
-    bead_columns = ["T7_polished_C", "T8_small_black_C", "T9_large_black_C"]
-    for row_index in table.index:
-        base_air = float(table.loc[row_index, "T6_air_C"])
-        assigned_air = base_air + ambient_shift
-        table.loc[row_index, "T6_air_C"] = round(assigned_air, 2)
-        table.loc[row_index, "T10_wall_C"] = round(
-            assigned_air + (float(table.loc[row_index, "T10_wall_C"]) - base_air) * wall_scale,
-            2,
+    rows = []
+    for specification in _radiation_case_specifications():
+        case, fan, shield, velocity, base_air, base_wall, base_surrounding, base_h_small, base_h_large = specification
+        air = float(base_air) + ambient_shift
+        wall = air + (float(base_wall) - float(base_air)) * wall_scale
+        if "exposed" in str(shield).lower():
+            effective_surrounding = wall
+        else:
+            effective_surrounding = air + (float(base_surrounding) - float(base_air)) * shield_scale
+        velocity = float(velocity) * velocity_scale
+        if velocity > 0:
+            h_small = forced_convection_h(velocity, 0.5)[0] * h_scale
+            h_large = forced_convection_h(velocity, 3.0)[0] * h_scale
+        else:
+            h_small = float(base_h_small) * h_scale
+            h_large = float(base_h_large) * h_scale
+        bead_temperatures = np.array(
+            [
+                equilibrium_sensor_temperature_C(air, effective_surrounding, h_small, 0.17),
+                equilibrium_sensor_temperature_C(air, effective_surrounding, h_small, 0.98),
+                equilibrium_sensor_temperature_C(air, effective_surrounding, h_large, 0.98),
+            ]
+        ) + bead_noise
+        rows.append(
+            [
+                case,
+                fan,
+                shield,
+                round(velocity, 2),
+                round(air, 2),
+                *(round(float(value), 2) for value in bead_temperatures),
+                round(wall, 2),
+            ]
         )
-        for bead_index, column in enumerate(bead_columns):
-            base_bias = float(table.loc[row_index, column]) - base_air
-            table.loc[row_index, column] = round(assigned_air + base_bias * bias_scale + bead_noise[bead_index], 2)
-    forced = table["Air_velocity_m_s"] > 0
-    velocity_scale = (0.96, 1.00, 1.04, 1.02)[variant]
-    table.loc[forced, "Air_velocity_m_s"] = np.round(table.loc[forced, "Air_velocity_m_s"] * velocity_scale, 2)
+    table = pd.DataFrame(rows, columns=RADIATION_COLUMNS)
     return normalise_radiation_data(table)
 
 
@@ -366,6 +415,40 @@ def analyse_conduction(
     return pd.DataFrame(results)
 
 
+def conduction_uncertainty_components(
+    voltage: float,
+    current: float,
+    delta_temperature: float,
+    diameter_mm: float,
+    spacing_mm: float,
+    voltage_uncertainty: float,
+    current_uncertainty: float,
+    temperature_uncertainty: float,
+    diameter_uncertainty_mm: float,
+    spacing_uncertainty_mm: float,
+) -> dict[str, float]:
+    """Return relative standard-uncertainty terms for k = 4VI L/(pi D^2 deltaT)."""
+    if min(abs(voltage), abs(current), abs(delta_temperature), diameter_mm, spacing_mm) <= 0:
+        return {
+            "Voltage": float("nan"),
+            "Current": float("nan"),
+            "Sensor spacing": float("nan"),
+            "Diameter": float("nan"),
+            "Temperature difference": float("nan"),
+            "Combined": float("nan"),
+        }
+    delta_delta_t = math.sqrt(2.0) * abs(temperature_uncertainty)
+    components = {
+        "Voltage": voltage_uncertainty / abs(voltage),
+        "Current": current_uncertainty / abs(current),
+        "Sensor spacing": spacing_uncertainty_mm / spacing_mm,
+        "Diameter": 2.0 * diameter_uncertainty_mm / diameter_mm,
+        "Temperature difference": delta_delta_t / abs(delta_temperature),
+    }
+    components["Combined"] = math.sqrt(sum(term**2 for term in components.values()))
+    return components
+
+
 def conduction_uncertainty_percent(
     voltage: float,
     current: float,
@@ -378,18 +461,20 @@ def conduction_uncertainty_percent(
     diameter_uncertainty_mm: float,
     spacing_uncertainty_mm: float,
 ) -> float:
-    """RSS relative uncertainty for k = VI L /(A deltaT)."""
-    if min(abs(voltage), abs(current), abs(delta_temperature), diameter_mm, spacing_mm) <= 0:
-        return float("nan")
-    delta_delta_t = math.sqrt(2.0) * abs(temperature_uncertainty)
-    terms = [
-        voltage_uncertainty / abs(voltage),
-        current_uncertainty / abs(current),
-        spacing_uncertainty_mm / spacing_mm,
-        2.0 * diameter_uncertainty_mm / diameter_mm,
-        delta_delta_t / abs(delta_temperature),
-    ]
-    return 100.0 * math.sqrt(sum(term**2 for term in terms))
+    """RSS relative uncertainty in k, returned as a percentage."""
+    components = conduction_uncertainty_components(
+        voltage,
+        current,
+        delta_temperature,
+        diameter_mm,
+        spacing_mm,
+        voltage_uncertainty,
+        current_uncertainty,
+        temperature_uncertainty,
+        diameter_uncertainty_mm,
+        spacing_uncertainty_mm,
+    )
+    return 100.0 * components["Combined"]
 
 
 def analyse_radiation(data: pd.DataFrame) -> pd.DataFrame:
