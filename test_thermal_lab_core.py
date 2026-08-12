@@ -13,6 +13,7 @@ from thermal_lab_core import (
     assigned_online_conduction_data,
     assigned_online_radiation_data,
     blank_conduction_data,
+    conduction_uncertainty_components,
     demonstration_conduction_data,
     demonstration_radiation_data,
     equilibrium_sensor_temperature_C,
@@ -51,6 +52,7 @@ class ThermalLabCoreTests(unittest.TestCase):
         self.assertTrue(aluminium["Thermal_conductivity_W_mK"].between(162.0, 198.0).all())
         self.assertTrue((analysed["Hot_contact_Rpp_m2K_W"] > 0).all())
         self.assertTrue((analysed["Cold_contact_Rpp_m2K_W"] > 0).all())
+        self.assertTrue((analysed["Cold_contact_jump_K"] > 2.5 * analysed["Hot_contact_jump_K"]).all())
         self.assertTrue((analysed["Quality_flags"] == "No automatic flags").all())
 
     def test_all_online_conduction_variants_remain_in_reference_ranges(self):
@@ -107,10 +109,52 @@ class ThermalLabCoreTests(unittest.TestCase):
     def test_supplied_radiation_example_has_expected_bias_pattern(self):
         analysed = analyse_radiation(demonstration_radiation_data())
         natural_exposed = analysed.iloc[0]
+        natural_shielded = analysed.iloc[1]
         forced_exposed = analysed.iloc[2]
+        forced_shielded = analysed.iloc[3]
         self.assertGreater(natural_exposed["T8_error_K"], natural_exposed["T7_error_K"])
-        self.assertLess(forced_exposed["Maximum_abs_error_K"], natural_exposed["Maximum_abs_error_K"])
+        self.assertGreater(natural_exposed["T9_error_K"], natural_exposed["T8_error_K"])
+        self.assertTrue(
+            (natural_shielded[["T7_error_K", "T8_error_K", "T9_error_K"]]
+             < natural_exposed[["T7_error_K", "T8_error_K", "T9_error_K"]]).all()
+        )
+        self.assertTrue(
+            (forced_exposed[["T7_error_K", "T8_error_K", "T9_error_K"]]
+             < natural_exposed[["T7_error_K", "T8_error_K", "T9_error_K"]]).all()
+        )
+        self.assertTrue(
+            (forced_shielded[["T7_error_K", "T8_error_K", "T9_error_K"]]
+             < forced_exposed[["T7_error_K", "T8_error_K", "T9_error_K"]]).all()
+        )
         self.assertTrue(math.isfinite(float(analysed["Maximum_abs_error_K"].max())))
+
+    def test_all_online_radiation_variants_preserve_the_teaching_hierarchy(self):
+        error_columns = ["T7_error_K", "T8_error_K", "T9_error_K"]
+        for student_id in ("00000000", "00000001", "00000002", "00000003", "12345678", "87654321"):
+            analysed = analyse_radiation(assigned_online_radiation_data(student_id))
+            natural_exposed, natural_shielded, forced_exposed, forced_shielded = [analysed.iloc[index] for index in range(4)]
+            self.assertGreater(natural_exposed["T9_error_K"], natural_exposed["T8_error_K"])
+            self.assertGreater(natural_exposed["T8_error_K"], natural_exposed["T7_error_K"])
+            self.assertTrue((natural_shielded[error_columns] < natural_exposed[error_columns]).all())
+            self.assertTrue((forced_exposed[error_columns] < natural_exposed[error_columns]).all())
+            self.assertTrue((forced_shielded[error_columns] < forced_exposed[error_columns]).all())
+
+    def test_conduction_uncertainty_components_reproduce_rss_total(self):
+        components = conduction_uncertainty_components(
+            voltage=10.0,
+            current=1.0,
+            delta_temperature=2.5,
+            diameter_mm=25.0,
+            spacing_mm=15.0,
+            voltage_uncertainty=0.01,
+            current_uncertainty=0.01,
+            temperature_uncertainty=0.10,
+            diameter_uncertainty_mm=0.10,
+            spacing_uncertainty_mm=0.10,
+        )
+        expected = math.sqrt(sum(value**2 for key, value in components.items() if key != "Combined"))
+        self.assertAlmostEqual(components["Combined"], expected, places=12)
+        self.assertGreater(components["Temperature difference"], components["Voltage"])
 
     def test_word_practical_report_is_generated_and_readable(self):
         raw = demonstration_conduction_data()
@@ -134,12 +178,14 @@ class ThermalLabCoreTests(unittest.TestCase):
             sample_calculation=["Q = 7.0 x 0.70 = 4.90 W."],
             evidence=["The controlled teaching data are physically consistent."],
             discussion_notes=[("Temperature distribution", "Three fitted regions and two contact jumps are visible.")],
-            logo_path=Path(__file__).resolve().parent / "assets" / "jcu_logo.png",
+            logo_path=Path(__file__).resolve().parent / "assets" / "jcu_logo.jpg",
         )
         self.assertGreater(len(report), 20_000)
         document = Document(BytesIO(report))
         all_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-        self.assertIn("THERMALLAB PRACTICAL REPORT", all_text)
+        self.assertIn("Contact resistance in linear heat conduction", all_text)
+        self.assertNotIn("THERMALLAB PRACTICAL REPORT", all_text)
+        self.assertIn("Key graphs", all_text)
         self.assertIn("Sample calculation", all_text)
 
 
