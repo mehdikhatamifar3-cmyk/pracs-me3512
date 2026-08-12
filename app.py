@@ -9,7 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, FancyArrowPatch, Rectangle
+from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch, Rectangle
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -28,6 +28,7 @@ from thermal_lab_core import (
     assigned_online_radiation_data,
     blank_conduction_data,
     blank_radiation_data,
+    conduction_uncertainty_components,
     conduction_uncertainty_percent,
     demonstration_conduction_data,
     demonstration_radiation_data,
@@ -51,7 +52,7 @@ st.set_page_config(
 
 APP_DIR = Path(__file__).resolve().parent
 ASSET_DIR = APP_DIR / "assets"
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 JCU_ID_PATTERN = re.compile(r"^\d{8}$")
 
 
@@ -63,7 +64,7 @@ def load_asset_b64(filename: str) -> str:
         return ""
 
 
-JCU_LOGO_B64 = load_asset_b64("jcu_logo.png")
+JCU_LOGO_B64 = load_asset_b64("jcu_logo.jpg")
 
 CONDUCTION_COLOURS = {
     "hot_contact": "#C2410C",
@@ -220,7 +221,7 @@ def initialise_state() -> None:
         "rad_sandbox_wall": 120.0,
         "rad_sandbox_h": 25.0,
         "rad_sandbox_emissivity": 0.98,
-        "rad_natural_h": 10.0,
+        "rad_natural_h": 70.0,
         "rad_h_scale": 1.0,
     }
     for key, value in defaults.items():
@@ -303,9 +304,9 @@ st.markdown(
       .app-header .eyebrow { font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; opacity:.83; }
       .app-header h1 { font-size:30px; line-height:1.10; margin:5px 0 5px; color:white; }
       .app-header .subtitle { font-size:13.5px; line-height:1.48; color:#E7F2FA; max-width:850px; }
-      .header-mark { min-width:230px; display:flex; justify-content:flex-end; }
-      .header-logo { background:#FFFFFF; border-radius:12px; padding:9px 12px; box-shadow:0 4px 14px rgba(1,31,54,.16); }
-      .header-logo img { display:block; width:220px; max-width:100%; height:auto; }
+      .header-mark { min-width:112px; display:flex; justify-content:flex-end; }
+      .header-logo { background:#FFFFFF; border-radius:12px; padding:7px; box-shadow:0 4px 14px rgba(1,31,54,.16); }
+      .header-logo img { display:block; width:96px; max-width:100%; height:auto; }
       .section-head { display:flex; gap:15px; align-items:flex-start; margin:17px 0 13px; }
       .section-number { width:42px; height:42px; flex:0 0 42px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#E9F3FB; border:1px solid #C8DDED; color:#0B4F8A; font-weight:850; font-size:17px; }
       .section-head h2 { margin:0; color:#183A57; font-size:25px; line-height:1.15; }
@@ -338,7 +339,7 @@ st.markdown(
         .hero-grid,.metric-row { grid-template-columns:1fr 1fr; }
         .app-header { grid-template-columns:1fr; }
         .header-mark { justify-content:flex-start; }
-        .header-logo img { width:205px; }
+        .header-logo img { width:88px; }
       }
       @media (max-width:620px) { .hero-grid,.metric-row { grid-template-columns:1fr; } }
     </style>
@@ -400,7 +401,7 @@ def section_heading(section: str, description: str) -> None:
 
 def render_header(practical: str) -> None:
     logo_html = (
-        f'<img src="data:image/png;base64,{JCU_LOGO_B64}" alt="James Cook University Australia">'
+        f'<img src="data:image/jpeg;base64,{JCU_LOGO_B64}" alt="James Cook University logo">'
         if JCU_LOGO_B64
         else '<div style="font-size:24px;font-weight:850;color:#0B4F8A">JCU</div>'
     )
@@ -543,34 +544,186 @@ def conduction_schematic() -> plt.Figure:
 
 
 def radiation_schematic() -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 10)
+    fig, ax = plt.subplots(figsize=(9.4, 8.3))
+    ax.set_xlim(0, 13.5)
+    ax.set_ylim(0, 15.2)
     ax.axis("off")
-    ax.add_patch(Rectangle((3.2, 1.0), 3.6, 8.0, facecolor="#F8FAFC", edgecolor="#334155", linewidth=1.6))
-    ax.add_patch(Rectangle((3.2, 5.0), 3.6, 2.8, facecolor="#F6B26B", edgecolor="#B45309", linewidth=1.4, alpha=0.78))
-    ax.text(7.1, 6.4, "heated duct wall (T10)", va="center", fontsize=10, color="#9A3412", fontweight="bold")
-    ax.add_patch(Circle((5.0, 1.7), 0.58, facecolor="#D8E7F0", edgecolor="#0B4F8A", linewidth=1.5))
-    ax.text(5.0, 1.7, "FAN", ha="center", va="center", fontsize=8, fontweight="bold", color="#0B4F8A")
-    for y in (2.5, 3.3, 4.1):
-        ax.add_patch(FancyArrowPatch((5.0, y - 0.25), (5.0, y + 0.25), arrowstyle="-|>", mutation_scale=15, color="#0B72A7", lw=1.5))
-    ax.text(2.95, 3.3, "air at T6", ha="right", va="center", fontsize=10, color="#0B4F8A", fontweight="bold")
-    bead_x = [4.25, 5.0, 5.78]
-    sizes = [0.09, 0.09, 0.23]
-    colours = ["#D7DDE3", "#111827", "#111827"]
-    labels = ["T7\npolished\nε=0.17", "T8\nsmall black\nε=0.98", "T9\nlarge black\nε=0.98"]
-    for x, radius, colour, label in zip(bead_x, sizes, colours, labels):
-        ax.add_patch(Circle((x, 6.4), radius, facecolor=colour, edgecolor="#111827", linewidth=1.2, zorder=4))
-        ax.plot([x, x], [6.4 + radius, 8.6], color="#475569", lw=1.0)
-        ax.text(x, 9.0, label, ha="center", va="top", fontsize=8.5, color="#334155")
-    for x in bead_x:
-        ax.add_patch(FancyArrowPatch((3.55, 6.4), (x - 0.13, 6.4), arrowstyle="->", mutation_scale=12, color="#C2410C", lw=1.0))
-        ax.add_patch(FancyArrowPatch((6.45, 6.4), (x + 0.13, 6.4), arrowstyle="->", mutation_scale=12, color="#C2410C", lw=1.0))
-    ax.add_patch(Rectangle((3.8, 5.65), 2.4, 1.5, fill=False, edgecolor="#0F766E", linewidth=2.0, linestyle="--"))
-    ax.text(7.1, 5.45, "movable radiation shield", va="center", fontsize=10, color="#0F766E", fontweight="bold")
-    ax.text(7.1, 4.95, "raised = shielded\nlowered = exposed", va="top", fontsize=9, color="#536779")
-    ax.text(5.0, 0.45, "HT16C concept schematic", ha="center", va="center", fontsize=9, color="#64748B")
-    fig.tight_layout()
+
+    # Vertical test duct and inlet transition.
+    duct_left, duct_right = 4.6, 7.6
+    ax.add_patch(
+        Rectangle(
+            (duct_left, 2.6),
+            duct_right - duct_left,
+            11.1,
+            facecolor="#EEF5F8",
+            edgecolor="#405465",
+            linewidth=2.0,
+        )
+    )
+    ax.add_patch(Rectangle((4.25, 2.25), 3.7, 0.45, facecolor="#A7B8C5", edgecolor="#405465", linewidth=1.4))
+
+    # Blower and throttle plate at the inlet.
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.9, 0.65),
+            3.75,
+            2.0,
+            boxstyle="round,pad=0.04,rounding_size=0.18",
+            facecolor="#61788C",
+            edgecolor="#334155",
+            linewidth=1.6,
+        )
+    )
+    ax.add_patch(Circle((2.0, 1.65), 0.55, facecolor="#405465", edgecolor="#D9E5ED", linewidth=1.3))
+    ax.add_patch(Circle((2.0, 1.65), 0.12, facecolor="#E53935", edgecolor="white", linewidth=0.9))
+    ax.text(2.9, 1.65, "VARIABLE-SPEED\nBLOWER", ha="center", va="center", fontsize=8.3, color="white", fontweight="bold")
+    ax.add_patch(Rectangle((4.65, 0.75), 2.95, 1.7, facecolor="#9FB2C1", edgecolor="#405465", linewidth=1.5))
+    for y in np.linspace(0.92, 2.28, 7):
+        ax.plot([4.85, 7.38], [y, y], color="#52697D", lw=1.0)
+    ax.plot([6.95, 7.95], [1.55, 1.15], color="#334155", lw=2.0)
+    ax.add_patch(Circle((7.95, 1.15), 0.11, facecolor="#F2A900", edgecolor="#334155", linewidth=0.8))
+    ax.annotate(
+        "Throttle plate\nsets the air speed",
+        xy=(7.55, 1.35),
+        xytext=(9.45, 1.05),
+        ha="left",
+        va="center",
+        fontsize=9,
+        color="#334155",
+        arrowprops={"arrowstyle": "->", "color": "#64748B", "lw": 1.1},
+    )
+
+    # Airflow through the duct.
+    for x in (5.45, 6.75):
+        for y in (3.4, 5.6, 7.6, 9.5, 12.1):
+            ax.add_patch(
+                FancyArrowPatch(
+                    (x, y - 0.45),
+                    (x, y + 0.45),
+                    arrowstyle="-|>",
+                    mutation_scale=15,
+                    color=RADIATION_COLOURS["air"],
+                    lw=1.55,
+                    alpha=0.88,
+                )
+            )
+    ax.text(6.1, 13.35, "AIRFLOW", ha="center", va="center", fontsize=9.5, color=RADIATION_COLOURS["air"], fontweight="bold")
+
+    # T6 is upstream of the heated measurement section.
+    ax.plot([10.4, 7.25, 6.35], [4.75, 4.75, 4.75], color="#4C7F94", lw=2.0)
+    ax.plot([6.35, 6.15], [4.75, 4.15], color="#4C7F94", lw=2.0)
+    ax.add_patch(Circle((6.15, 4.08), 0.08, facecolor=RADIATION_COLOURS["air"], edgecolor="white", linewidth=0.8, zorder=5))
+    ax.text(10.55, 4.75, "T6  reference air temperature", ha="left", va="center", fontsize=9.5, color=RADIATION_COLOURS["air"], fontweight="bold")
+
+    # Anemometer in the lower-middle duct.
+    ax.plot([10.2, 7.15, 6.35], [6.45, 6.45, 6.45], color="#334155", lw=1.7)
+    ax.add_patch(Rectangle((7.62, 6.15), 0.72, 0.60, facecolor="#334155", edgecolor="#172033", linewidth=1.0))
+    ax.add_patch(Circle((6.20, 6.45), 0.32, facecolor="#E5EDF2", edgecolor="#334155", linewidth=1.2))
+    for angle in (0, 120, 240):
+        theta = math.radians(angle)
+        ax.plot([6.20, 6.20 + 0.27 * math.cos(theta)], [6.45, 6.45 + 0.27 * math.sin(theta)], color="#334155", lw=1.2)
+    ax.text(10.35, 6.45, "Anemometer  V", ha="left", va="center", fontsize=9.5, color="#334155", fontweight="bold")
+
+    # Heated wall section and coils.
+    heater_y0, heater_y1 = 8.0, 11.6
+    for x, direction in ((4.22, -1), (7.98, 1)):
+        ax.add_patch(Rectangle((x - 0.16, heater_y0), 0.32, heater_y1 - heater_y0, facecolor="#FDE5E3", edgecolor="#B42318", linewidth=1.2))
+        ys = np.linspace(heater_y0 + 0.18, heater_y1 - 0.18, 18)
+        xs = x + 0.11 * np.where(np.arange(len(ys)) % 2 == 0, -1, 1)
+        ax.plot(xs, ys, color="#D64545", lw=1.4)
+    ax.annotate(
+        "Electrical heaters\ncreate hot radiative walls",
+        xy=(7.98, 9.3),
+        xytext=(10.2, 8.8),
+        ha="left",
+        va="center",
+        fontsize=9.3,
+        color=RADIATION_COLOURS["wall"],
+        fontweight="bold",
+        arrowprops={"arrowstyle": "->", "color": RADIATION_COLOURS["wall"], "lw": 1.1},
+    )
+
+    # T10 monitors the heated wall near the test beads.
+    ax.plot([3.3, 4.45], [12.55, 12.55], color=RADIATION_COLOURS["wall"], lw=1.8)
+    ax.add_patch(Circle((4.48, 12.55), 0.08, facecolor=RADIATION_COLOURS["wall"], edgecolor="white", linewidth=0.8, zorder=5))
+    ax.annotate(
+        "T10  heated-wall temperature",
+        xy=(4.48, 12.55),
+        xytext=(0.55, 12.75),
+        ha="left",
+        va="center",
+        fontsize=9.5,
+        color=RADIATION_COLOURS["wall"],
+        fontweight="bold",
+        arrowprops={"arrowstyle": "->", "color": RADIATION_COLOURS["wall"], "lw": 1.1},
+    )
+
+    # Three sensing beads with separate, directly labelled probes.
+    probe_rows = [
+        (11.25, 6.70, 0.09, "#D7DDE3", "T7  polished 0.5 mm  (ε ≈ 0.17)"),
+        (10.75, 6.35, 0.09, "#111827", "T8  black 0.5 mm  (ε ≈ 0.98)"),
+        (10.25, 5.95, 0.22, "#111827", "T9  black 3 mm  (ε ≈ 0.98)"),
+    ]
+    for y, bead_x, radius, colour, label in probe_rows:
+        ax.plot([10.55, 7.45, bead_x + radius], [y, y, y], color="#5D7283", lw=1.6)
+        ax.add_patch(Circle((bead_x, y), radius, facecolor=colour, edgecolor="#111827", linewidth=1.1, zorder=6))
+        ax.text(10.72, y, label, ha="left", va="center", fontsize=9.1, color="#334155")
+
+    # Movable shield around the bead zone, shown as a dashed sleeve.
+    ax.add_patch(
+        Rectangle(
+            (5.35, 9.65),
+            1.85,
+            2.15,
+            fill=False,
+            edgecolor=RADIATION_COLOURS["shield"],
+            linewidth=2.1,
+            linestyle=(0, (5, 3)),
+        )
+    )
+    ax.add_patch(
+        FancyArrowPatch(
+            (5.05, 9.75),
+            (5.05, 11.70),
+            arrowstyle="<->",
+            mutation_scale=14,
+            color=RADIATION_COLOURS["shield"],
+            lw=1.5,
+        )
+    )
+    ax.annotate(
+        "Movable radiation shield\nDOWN: beads exposed to hot wall\nUP: hot wall view blocked",
+        xy=(5.35, 10.65),
+        xytext=(0.55, 9.65),
+        ha="left",
+        va="center",
+        fontsize=9.1,
+        color=RADIATION_COLOURS["shield"],
+        fontweight="bold",
+        arrowprops={"arrowstyle": "->", "color": RADIATION_COLOURS["shield"], "lw": 1.1},
+    )
+
+    ax.text(
+        0.55,
+        14.65,
+        "HT16C radiation-error apparatus",
+        ha="left",
+        va="center",
+        fontsize=15,
+        fontweight="bold",
+        color="#183A57",
+    )
+    ax.text(
+        0.55,
+        14.15,
+        "Follow the airflow from the blower to T6, then to the heated test section and the three beads.",
+        ha="left",
+        va="center",
+        fontsize=9.3,
+        color="#64748B",
+    )
+    fig.subplots_adjust(left=0.02, right=0.99, top=0.99, bottom=0.02)
     return fig
 
 
@@ -1023,7 +1176,10 @@ def render_record(practical: str) -> None:
 
 def conduction_temperature_plot(raw_row: pd.Series, result: pd.Series) -> plt.Figure:
     temperatures = np.array([float(raw_row[f"T{i}_C"]) for i in range(1, 9)])
-    fig, ax = plt.subplots(figsize=(11.4, 6.5))
+    fig = plt.figure(figsize=(11.4, 7.0))
+    grid = fig.add_gridspec(2, 1, height_ratios=[4.5, 1.15], hspace=0.23)
+    ax = fig.add_subplot(grid[0])
+    formula_ax = fig.add_subplot(grid[1])
     ax.scatter(
         THERMOCOUPLE_POSITIONS_M * 1000,
         temperatures,
@@ -1039,14 +1195,19 @@ def conduction_temperature_plot(raw_row: pd.Series, result: pd.Series) -> plt.Fi
         (np.linspace(HOT_INTERFACE_M, COLD_INTERFACE_M, 60), result["Sample_slope_K_m"], result["Sample_intercept_C"], "Sample", "#B28A00"),
         (np.linspace(COLD_INTERFACE_M, 0.105, 60), result["Cold_slope_K_m"], result["Cold_intercept_C"], "Cold bar", "#0F766E"),
     ]
-    formula_lines = []
+    formula_items = []
     r_squared_values = [result["Hot_fit_R2"], result["Sample_fit_R2"], result["Cold_fit_R2"]]
     for (x, slope, intercept, label, colour), r_squared in zip(regions, r_squared_values):
         ax.plot(x * 1000, slope * x + intercept, lw=2.4, color=colour, label=f"{label} fitted line")
         slope_per_mm = float(slope) / 1000.0
         intercept_sign = "+" if float(intercept) >= 0 else "−"
-        formula_lines.append(
-            f"{label}:  T = {slope_per_mm:.4f}x {intercept_sign} {abs(float(intercept)):.2f}    R² = {float(r_squared):.4f}"
+        formula_items.append(
+            (
+                label,
+                f"T = {slope_per_mm:.4f}x {intercept_sign} {abs(float(intercept)):.2f}",
+                f"R² = {float(r_squared):.4f}",
+                colour,
+            )
         )
 
     interface_points = [
@@ -1068,12 +1229,22 @@ def conduction_temperature_plot(raw_row: pd.Series, result: pd.Series) -> plt.Fi
         ]
     )
     temperature_span = max(float(np.ptp(all_temperatures)), 1.0)
-    ax.set_ylim(float(np.min(all_temperatures)) - 0.10 * temperature_span, float(np.max(all_temperatures)) + 0.12 * temperature_span)
+    ax.set_ylim(float(np.min(all_temperatures)) - 0.16 * temperature_span, float(np.max(all_temperatures)) + 0.17 * temperature_span)
     ax.set_xlim(-4.0, 109.0)
 
     for x, label in [(HOT_INTERFACE_M, "hot interface"), (COLD_INTERFACE_M, "cold interface")]:
         ax.axvline(x * 1000, color="#94A3B8", ls="--", lw=1.2)
-        ax.text(x * 1000, ax.get_ylim()[1], label, ha="center", va="top", fontsize=8.5, color="#64748B")
+        ax.annotate(
+            label,
+            xy=(x * 1000, ax.get_ylim()[1]),
+            xytext=(0, -8),
+            textcoords="offset points",
+            ha="center",
+            va="top",
+            fontsize=8.5,
+            color="#64748B",
+            bbox={"boxstyle": "round,pad=0.18", "facecolor": "white", "edgecolor": "none", "alpha": 0.88},
+        )
 
     for point_index, (x_m, left_temperature, right_temperature, contact_name) in enumerate(interface_points):
         x_mm = x_m * 1000.0
@@ -1095,58 +1266,83 @@ def conduction_temperature_plot(raw_row: pd.Series, result: pd.Series) -> plt.Fi
             linewidth=1.8,
             zorder=6,
         )
+        label_offset = 9 if point_index == 0 else -9
+        label_alignment = "left" if point_index == 0 else "right"
+        left_vertical_offset = 9 if point_index == 0 else -6
+        left_vertical_alignment = "bottom" if point_index == 0 else "top"
         ax.annotate(
-            f"Left: {left_temperature:.2f} °C",
+            f"L  {left_temperature:.2f} °C",
             xy=(x_mm, left_temperature),
-            xytext=(-15, 18),
+            xytext=(label_offset, left_vertical_offset),
             textcoords="offset points",
-            ha="right",
-            va="bottom",
-            fontsize=8.5,
+            ha=label_alignment,
+            va=left_vertical_alignment,
+            fontsize=8.1,
             fontweight="bold",
             color="#7F1D1D",
-            arrowprops={"arrowstyle": "-", "color": "#B42318", "lw": 0.9},
+            bbox={"boxstyle": "round,pad=0.18", "facecolor": "#FFF7F6", "edgecolor": "#F2C6C2"},
         )
         ax.annotate(
-            f"Right: {right_temperature:.2f} °C",
+            f"R  {right_temperature:.2f} °C",
             xy=(x_mm, right_temperature),
-            xytext=(15, -18),
+            xytext=(label_offset, -9),
             textcoords="offset points",
-            ha="left",
+            ha=label_alignment,
             va="top",
-            fontsize=8.5,
+            fontsize=8.1,
             fontweight="bold",
             color="#7F1D1D",
-            arrowprops={"arrowstyle": "-", "color": "#B42318", "lw": 0.9},
+            bbox={"boxstyle": "round,pad=0.18", "facecolor": "#FFF7F6", "edgecolor": "#F2C6C2"},
         )
+        delta_x = x_mm + (5.0 if point_index == 0 else -5.0)
         ax.text(
-            x_mm,
-            min(float(left_temperature), float(right_temperature)) - 0.035 * temperature_span,
-            contact_name,
-            ha="center",
-            va="top",
-            fontsize=8,
+            delta_x,
+            0.5 * (float(left_temperature) + float(right_temperature)),
+            f"ΔT = {left_temperature-right_temperature:.2f} K",
+            ha="left" if point_index == 0 else "right",
+            va="center",
+            fontsize=8.1,
             color="#7F1D1D",
+            fontweight="bold",
         )
     for index, (x, y) in enumerate(zip(THERMOCOUPLE_POSITIONS_M * 1000, temperatures), start=1):
-        ax.annotate(f"T{index}", (x, y), xytext=(0, 8), textcoords="offset points", ha="center", fontsize=8, color="#334155")
+        offset = 10 if index % 2 else 7
+        ax.annotate(f"T{index}", (x, y), xytext=(0, offset), textcoords="offset points", ha="center", fontsize=8, color="#334155")
     ax.set_xlabel("Position x (mm)")
     ax.set_ylabel("Temperature (°C)")
-    ax.set_title("Temperature versus distance: measured points, fitted lines and contacts", loc="left", fontweight="bold", color="#183A57")
+    ax.set_title("Temperature versus distance", loc="left", pad=33, fontweight="bold", color="#183A57")
     ax.grid(alpha=0.20)
-    ax.legend(ncol=3, frameon=False, fontsize=8.2, loc="lower left")
-    fig.text(
-        0.075,
-        0.025,
-        "Linear fits (T in °C, x in mm)\n" + "\n".join(formula_lines),
-        ha="left",
-        va="bottom",
-        fontsize=8.8,
-        family="monospace",
-        color="#334155",
-        bbox={"boxstyle": "round,pad=0.55", "facecolor": "#F8FAFC", "edgecolor": "#D7E0E9"},
+    ax.legend(
+        ncol=3,
+        frameon=False,
+        fontsize=8.1,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.095),
+        columnspacing=1.4,
+        handlelength=2.2,
     )
-    fig.subplots_adjust(left=0.075, right=0.985, top=0.90, bottom=0.27)
+
+    formula_ax.set_xlim(0, 1)
+    formula_ax.set_ylim(0, 1)
+    formula_ax.axis("off")
+    formula_ax.add_patch(
+        FancyBboxPatch(
+            (0.01, 0.08),
+            0.98,
+            0.84,
+            boxstyle="round,pad=0.012,rounding_size=0.025",
+            facecolor="#F8FAFC",
+            edgecolor="#D7E0E9",
+            linewidth=1.0,
+        )
+    )
+    formula_ax.text(0.03, 0.77, "Fitted lines (T in °C; x in mm)", fontsize=9.1, fontweight="bold", color="#334155", va="center")
+    for x_position, (label, formula, r_squared, colour) in zip((0.03, 0.355, 0.68), formula_items):
+        formula_ax.plot([x_position, x_position + 0.055], [0.53, 0.53], color=colour, lw=3.0, solid_capstyle="round")
+        formula_ax.text(x_position + 0.065, 0.56, label, fontsize=8.7, fontweight="bold", color="#334155", va="center")
+        formula_ax.text(x_position + 0.065, 0.34, formula, fontsize=8.5, family="monospace", color="#334155", va="center")
+        formula_ax.text(x_position + 0.065, 0.17, r_squared, fontsize=8.1, color="#64748B", va="center")
+    fig.subplots_adjust(left=0.075, right=0.985, top=0.88, bottom=0.04)
     return fig
 
 
@@ -1445,6 +1641,16 @@ def render_conduction_calculate() -> None:
         )
 
     with st.expander("Quantitative uncertainty estimate for k"):
+        st.markdown("**Propagation model used by the app**")
+        st.latex(r"k=\frac{4f_QVIL}{\pi D^2\Delta T},\qquad \Delta T=T_4-T_5")
+        st.latex(
+            r"\left(\frac{u_k}{k}\right)^2="
+            r"\left(\frac{u_V}{V}\right)^2+\left(\frac{u_I}{I}\right)^2+"
+            r"\left(\frac{u_L}{L}\right)^2+\left(2\frac{u_D}{D}\right)^2+"
+            r"\left(\frac{u_{\Delta T}}{\Delta T}\right)^2"
+        )
+        st.latex(r"u_{\Delta T}=\sqrt{u_{T4}^2+u_{T5}^2}=\sqrt{2}\,u_T")
+        st.caption("Independent input uncertainties are combined by root-sum-of-squares (RSS). The heat fraction fQ is treated as an explicit model assumption, not an instrument uncertainty.")
         c1, c2, c3, c4, c5 = st.columns(5)
         d_v = c1.number_input("±V (V)", min_value=0.0, max_value=5.0, step=0.01, key="unc_v")
         d_i = c2.number_input("±I (A)", min_value=0.0, max_value=2.0, step=0.01, key="unc_i")
@@ -1464,8 +1670,52 @@ def render_conduction_calculate() -> None:
             d_d,
             d_l,
         )
+        uncertainty_components = conduction_uncertainty_components(
+            result["Voltage_V"],
+            result["Current_A"],
+            delta_t_sample,
+            st.session_state.diameter_mm,
+            15.0,
+            d_v,
+            d_i,
+            d_t,
+            d_d,
+            d_l,
+        )
         if math.isfinite(uncertainty):
-            st.write(f"Estimated RSS relative uncertainty in k: **{uncertainty:.1f}%** (instrument uncertainties only).")
+            component_labels = [
+                ("Voltage", "uV/V"),
+                ("Current", "uI/I"),
+                ("Sensor spacing", "uL/L"),
+                ("Diameter", "2uD/D"),
+                ("Temperature difference", "uΔT/ΔT"),
+            ]
+            component_table = pd.DataFrame(
+                [
+                    {
+                        "Input": label,
+                        "Relative term": expression,
+                        "Relative uncertainty (%)": 100.0 * uncertainty_components[label],
+                        "Share of variance (%)": 100.0 * uncertainty_components[label] ** 2 / uncertainty_components["Combined"] ** 2
+                        if uncertainty_components["Combined"] > 0
+                        else 0.0,
+                    }
+                    for label, expression in component_labels
+                ]
+            )
+            substitution = " + ".join(
+                f"({100.0 * uncertainty_components[label]:.2f}%)²" for label, _ in component_labels
+            )
+            st.write(f"For this operating point: uₖ/k = √[{substitution}] = **{uncertainty:.2f}%**.")
+            st.dataframe(
+                component_table,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Relative uncertainty (%)": st.column_config.NumberColumn("Relative uncertainty (%)", format="%.2f"),
+                    "Share of variance (%)": st.column_config.NumberColumn("Share of combined variance (%)", format="%.1f"),
+                },
+            )
             if abs(delta_t_sample) < 2 * math.sqrt(2) * d_t:
                 st.warning("The T4-T5 temperature difference is small relative to the thermocouple uncertainty; k will be highly sensitive to small reading changes.")
         st.caption("This does not include systematic effects such as lateral heat loss, imperfect steady state, geometry error or the assumption Q = VI.")
@@ -1491,6 +1741,100 @@ def radiation_error_plot(analysed: pd.DataFrame) -> plt.Figure:
     ax.grid(axis="y", alpha=0.20)
     ax.legend(ncol=3, frameon=False)
     fig.tight_layout()
+    return fig
+
+
+def radiation_h_sensitivity_plot(
+    row: pd.Series,
+    measured_bead_C: float,
+    emissivity: float,
+    selected_h_W_m2K: float,
+) -> plt.Figure:
+    """Show how the assumed h changes the radiation-corrected medium temperature."""
+    selected_h = max(float(selected_h_W_m2K), 1.0)
+    h_min = max(2.0, selected_h / 10.0)
+    h_max = max(650.0, selected_h * 2.4)
+    h_values = np.geomspace(h_min, h_max, 240)
+    surrounding = float(row["T10_wall_C"])
+    reference_air = float(row["T6_air_C"])
+    corrected = np.array(
+        [
+            radiation_corrected_medium_temperature_C(
+                measured_bead_C,
+                surrounding,
+                h_value,
+                emissivity,
+            )
+            for h_value in h_values
+        ]
+    )
+    selected_corrected = radiation_corrected_medium_temperature_C(
+        measured_bead_C,
+        surrounding,
+        selected_h,
+        emissivity,
+    )
+
+    fig, (temperature_ax, correction_ax) = plt.subplots(
+        2,
+        1,
+        figsize=(10.2, 6.0),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.55, 1.0]},
+    )
+    temperature_ax.semilogx(
+        h_values,
+        corrected,
+        color=RADIATION_COLOURS["air"],
+        lw=2.6,
+        label="Corrected medium temperature Tm",
+    )
+    temperature_ax.axhline(reference_air, color=RADIATION_COLOURS["convection"], lw=1.7, ls="--", label="Independent T6 air reference")
+    temperature_ax.axhline(measured_bead_C, color=RADIATION_COLOURS["bead"], lw=1.5, ls=":", label="Measured T8 bead")
+    temperature_ax.axvline(selected_h, color="#64748B", lw=1.3, ls="--")
+    temperature_ax.scatter([selected_h], [selected_corrected], s=72, color=RADIATION_COLOURS["air"], edgecolor="white", linewidth=1.2, zorder=5)
+    temperature_ax.annotate(
+        f"selected h = {selected_h:.1f}\nTm = {selected_corrected:.2f} °C",
+        xy=(selected_h, selected_corrected),
+        xytext=(18, -48),
+        textcoords="offset points",
+        fontsize=8.6,
+        color="#334155",
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#D7E0E9"},
+        arrowprops={"arrowstyle": "->", "color": "#64748B", "lw": 1.0},
+    )
+    temperature_ax.set_ylabel("Temperature (°C)")
+    temperature_ax.grid(which="both", alpha=0.18)
+    temperature_ax.legend(ncol=3, frameon=False, fontsize=8.2, loc="lower center", bbox_to_anchor=(0.5, 1.04))
+
+    correction_magnitude = np.abs(corrected - measured_bead_C)
+    correction_ax.semilogx(h_values, correction_magnitude, color=RADIATION_COLOURS["radiation"], lw=2.5)
+    correction_ax.axvline(selected_h, color="#64748B", lw=1.3, ls="--")
+    correction_ax.scatter(
+        [selected_h],
+        [abs(selected_corrected - measured_bead_C)],
+        s=62,
+        color=RADIATION_COLOURS["radiation"],
+        edgecolor="white",
+        linewidth=1.0,
+        zorder=5,
+    )
+    correction_ax.set_xlabel("Convective heat-transfer coefficient h (W/m²·K), logarithmic scale")
+    correction_ax.set_ylabel("|Tm - T8| (K)")
+    correction_ax.set_title("Radiation correction magnitude decreases approximately as 1/h", loc="left", fontsize=10, fontweight="bold", color="#334155")
+    correction_ax.grid(which="both", alpha=0.18)
+    for axis in (temperature_ax, correction_ax):
+        axis.spines[["top", "right"]].set_visible(False)
+    fig.suptitle(
+        "Sensitivity of the energy-balance correction to h",
+        x=0.075,
+        y=0.985,
+        ha="left",
+        fontsize=14,
+        fontweight="bold",
+        color="#183A57",
+    )
+    fig.tight_layout(h_pad=1.55, rect=[0, 0, 1, 0.91])
     return fig
 
 
@@ -1555,8 +1899,8 @@ def render_radiation_calculate() -> None:
     velocity = float(row["Air_velocity_m_s"])
     manual_h = None
     if velocity <= 0:
-        manual_h = st.number_input("Assumed natural-convection h (W/m²·K)", min_value=1.0, max_value=100.0, step=1.0, key="rad_natural_h")
-        st.caption("Natural-convection h is not obtained from the forced-crossflow correlation. Test a plausible range and report the assumption.")
+        manual_h = st.number_input("Assumed natural-convection h for a 0.5 mm bead (W/m²·K)", min_value=1.0, max_value=250.0, step=1.0, key="rad_natural_h")
+        st.caption("The controlled teaching data use a lower effective h for the 3 mm bead (half the 0.5 mm value) to represent its weaker area-based convective coupling.")
     h_scale = st.slider("h sensitivity multiplier", 0.50, 1.50, step=0.05, key="rad_h_scale", help="Tests sensitivity to property and correlation uncertainty.")
     sensors = [
         ("T7 polished 0.5 mm", float(row["T7_polished_C"]), 0.17, 0.5),
@@ -1568,7 +1912,8 @@ def render_radiation_calculate() -> None:
         if manual_h is None:
             h_base, reynolds, nusselt = forced_convection_h(velocity, diameter)
         else:
-            h_base, reynolds, nusselt = float(manual_h), np.nan, np.nan
+            h_base = float(manual_h) if diameter <= 0.5 else 0.5 * float(manual_h)
+            reynolds, nusselt = np.nan, np.nan
         h = h_base * h_scale
         corrected = radiation_corrected_medium_temperature_C(t_bead, float(row["T10_wall_C"]), h, emissivity)
         h_r = linearised_radiation_coefficient_W_m2K(t_bead, float(row["T10_wall_C"]), emissivity)
@@ -1609,6 +1954,16 @@ def render_radiation_calculate() -> None:
     mean_abs_before = np.mean([abs(item[1] - float(row["T6_air_C"])) for item in sensors])
     mean_abs_after = float(correction["Residual_to_T6_K"].abs().mean())
     sample = correction.iloc[1]
+    st.pyplot(
+        radiation_h_sensitivity_plot(
+            row,
+            float(sample["Measured_bead_C"]),
+            float(sample["Emissivity"]),
+            float(sample["h_W_m2K"]),
+        ),
+        use_container_width=True,
+    )
+    st.caption("For a fixed bead and surrounding temperature, increasing h reduces the radiation correction. The h value where the blue curve meets the green T6 line is most consistent with the independent air reference.")
     with st.expander("Worked correction example: T8 black 0.5 mm", expanded=True):
         bead_kelvin = float(sample["Measured_bead_C"]) + 273.15
         surrounding_kelvin = float(row["T10_wall_C"]) + 273.15
@@ -2055,6 +2410,13 @@ def safe_file_part(value: str, fallback: str) -> str:
     return cleaned or fallback
 
 
+def figure_png_bytes(figure: plt.Figure) -> bytes:
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format="png", dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return buffer.getvalue()
+
+
 def practical_report_bytes(
     practical: str,
     raw: pd.DataFrame,
@@ -2067,6 +2429,7 @@ def practical_report_bytes(
         "lab_date": str(st.session_state.lab_date),
         "pathway": st.session_state.pathway,
     }
+    figures: list[tuple[str, bytes, str]] = []
     if practical == PRACTICAL_1:
         aim = (
             "Measure the steady one-dimensional temperature distribution, determine the sample thermal conductivity using Fourier's law, "
@@ -2078,6 +2441,10 @@ def practical_report_bytes(
             ("k = -q''/(dT/dx)", "Thermal conductivity from the fitted sample gradient."),
             ("Tface = m xinterface + b", "Interface temperature extrapolated from a regional fitted line."),
             ("R''c = (Tleft - Tright)/q''", "Area-specific thermal contact resistance."),
+            (
+                "(uk/k)^2 = (uV/V)^2 + (uI/I)^2 + (uL/L)^2 + (2uD/D)^2 + (uDeltaT/DeltaT)^2",
+                "Independent input uncertainties combined by root-sum-of-squares; uDeltaT = sqrt(2) uT.",
+            ),
         ]
         parameter_definitions = [
             (str(row.Symbol), f"{row.Definition}; unit: {row.Unit}")
@@ -2088,11 +2455,28 @@ def practical_report_bytes(
             ("Heat fraction fQ", f"{st.session_state.heat_fraction:.3f}"),
             ("Brass reference k", f"{st.session_state.brass_reference_k:.1f} W/(m K); practical-note range 110-128 W/(m K)"),
             ("Aluminium reference k", f"{st.session_state.aluminium_reference_k:.1f} W/(m K); practical-note value approximately 180 W/(m K)"),
+            (
+                "Instrument uncertainties",
+                f"uV={st.session_state.unc_v:.2f} V, uI={st.session_state.unc_i:.2f} A, uT={st.session_state.unc_t:.2f} K, "
+                f"uD={st.session_state.unc_d:.2f} mm, uL={st.session_state.unc_l:.2f} mm",
+            ),
         ]
         sample_calculation = []
         if not analysed.empty:
             result = analysed.iloc[0]
             source_row = raw.loc[int(result["Source_row"])]
+            uncertainty_value = conduction_uncertainty_percent(
+                result["Voltage_V"],
+                result["Current_A"],
+                float(source_row["T4_C"] - source_row["T5_C"]),
+                st.session_state.diameter_mm,
+                15.0,
+                st.session_state.unc_v,
+                st.session_state.unc_i,
+                st.session_state.unc_t,
+                st.session_state.unc_d,
+                st.session_state.unc_l,
+            )
             sample_calculation = [
                 f"A = pi({st.session_state.diameter_mm/1000:.4f} m)^2/4 = {result['Area_m2']:.6e} m^2.",
                 f"Q = {st.session_state.heat_fraction:.3f} x {result['Voltage_V']:.3f} V x {result['Current_A']:.3f} A = {result['Assumed_conduction_heat_W']:.3f} W; q'' = {result['Heat_flux_W_m2']:.1f} W/m^2.",
@@ -2100,6 +2484,21 @@ def practical_report_bytes(
                 f"k = -q''/ms = {result['Thermal_conductivity_W_mK']:.2f} W/(m K).",
                 f"Hot contact temperatures are {result['Hot_bar_face_C']:.2f} C (left) and {result['Sample_hot_face_C']:.2f} C (right), giving R''hot = {result['Hot_contact_Rpp_m2K_W']:.3e} m^2 K/W.",
                 f"Cold contact temperatures are {result['Sample_cold_face_C']:.2f} C (left) and {result['Cold_bar_face_C']:.2f} C (right), giving R''cold = {result['Cold_contact_Rpp_m2K_W']:.3e} m^2 K/W.",
+                f"Using the stated independent input uncertainties, RSS propagation gives uk/k = {uncertainty_value:.2f}% (instrument terms only).",
+            ]
+            graph_result = analysed.loc[analysed["Contact_share_pct"].astype(float).idxmax()]
+            graph_raw = raw.loc[int(graph_result["Source_row"])]
+            figures = [
+                (
+                    f"Temperature-distance profile for {graph_result['Material']} trial {graph_result['Trial']}",
+                    figure_png_bytes(conduction_temperature_plot(graph_raw, graph_result)),
+                    "Separate regional fits expose the two interface temperatures on each contact and the unequal hot- and cold-contact jumps.",
+                ),
+                (
+                    "Allocation of the fitted temperature drop",
+                    figure_png_bytes(conduction_resistance_plot(graph_result)),
+                    "The stacked contributions distinguish the specimen resistance from the two contact resistances.",
+                ),
             ]
         discussion_notes = [
             ("Temperature distribution", st.session_state.cond_interpret_1),
@@ -2150,6 +2549,32 @@ def practical_report_bytes(
                 f"Using epsilon = 0.98 and Tsur = {result['T10_wall_C']:.2f} C, the corrected medium temperature is {corrected:.2f} C.",
                 f"The correction residual relative to T6 is {corrected-float(result['T6_air_C']):+.2f} K.",
             ]
+            exposed_forced = analysed[
+                (pd.to_numeric(analysed["Air_velocity_m_s"], errors="coerce") > 0)
+                & analysed["Shield"].astype(str).str.contains("exposed", case=False, na=False)
+            ]
+            graph_row = exposed_forced.iloc[0] if not exposed_forced.empty else result
+            graph_velocity = float(graph_row["Air_velocity_m_s"])
+            graph_h = forced_convection_h(graph_velocity, 0.5)[0] if graph_velocity > 0 else float(st.session_state.rad_natural_h)
+            figures = [
+                (
+                    "Thermocouple bias across the four operating cases",
+                    figure_png_bytes(radiation_error_plot(analysed)),
+                    "The controlled data isolate the expected effects: black and larger beads are more radiation-sensitive, while shielding and stronger airflow reduce bias.",
+                ),
+                (
+                    f"Sensitivity of the T8 correction to h for {graph_row['Case']}",
+                    figure_png_bytes(
+                        radiation_h_sensitivity_plot(
+                            graph_row,
+                            float(graph_row["T8_small_black_C"]),
+                            0.98,
+                            graph_h,
+                        )
+                    ),
+                    "The inferred medium temperature depends strongly on h when convection is weak; at larger h the correction approaches the measured bead temperature.",
+                ),
+            ]
         discussion_notes = [
             ("Error ranking", st.session_state.rad_interpret_1),
             ("Shield and airflow effects", st.session_state.rad_interpret_2),
@@ -2172,7 +2597,8 @@ def practical_report_bytes(
         sample_calculation=sample_calculation,
         evidence=evidence,
         discussion_notes=discussion_notes,
-        logo_path=ASSET_DIR / "jcu_logo.png",
+        figures=figures,
+        logo_path=ASSET_DIR / "jcu_logo.jpg",
     )
 
 
@@ -2238,7 +2664,7 @@ def render_review(practical: str) -> None:
             use_container_width=True,
         )
     st.subheader("Generate the practical report")
-    st.caption("The Word report includes JCU branding, student details, equations and definitions, raw and analysed data, one worked example, evidence, and your discussion notes.")
+    st.caption("The Word report includes JCU branding, student details, equations and definitions, raw and analysed data, important graphs, one worked example, evidence, and your discussion notes.")
     report_key = f"_generated_report_{prefix}"
     report_filename_key = f"_generated_report_filename_{prefix}"
     if st.button("Generate practical report (.docx)", type="primary", use_container_width=True, key=f"generate_report_{prefix}"):
