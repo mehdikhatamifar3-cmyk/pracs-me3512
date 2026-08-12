@@ -201,6 +201,38 @@ def _add_callout(document: Document, title: str, text: str) -> None:
     document.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
+def _add_figure(
+    document: Document,
+    image_bytes: bytes,
+    caption: str,
+    explanation: str,
+    figure_number: int,
+) -> None:
+    picture_paragraph = document.add_paragraph()
+    picture_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    picture_paragraph.paragraph_format.space_before = Pt(4)
+    picture_paragraph.paragraph_format.space_after = Pt(4)
+    picture_paragraph.paragraph_format.keep_with_next = True
+    picture_run = picture_paragraph.add_run()
+    picture_run.add_picture(BytesIO(image_bytes), width=Inches(6.10))
+
+    caption_paragraph = document.add_paragraph()
+    caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    caption_paragraph.paragraph_format.space_after = Pt(3)
+    caption_paragraph.paragraph_format.keep_with_next = bool(explanation)
+    label_run = caption_paragraph.add_run(f"Figure {figure_number}. ")
+    _set_run_font(label_run, size=9.2, bold=True, colour=JCU_DARK_BLUE)
+    caption_run = caption_paragraph.add_run(caption)
+    _set_run_font(caption_run, size=9.2, colour=INK)
+
+    if explanation:
+        explanation_paragraph = document.add_paragraph(explanation)
+        explanation_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        explanation_paragraph.paragraph_format.space_after = Pt(8)
+        for run in explanation_paragraph.runs:
+            _set_run_font(run, size=8.8, italic=True, colour=MUTED)
+
+
 def _add_page_field(paragraph) -> None:
     run = paragraph.add_run()
     begin = OxmlElement("w:fldChar")
@@ -279,8 +311,8 @@ def _add_title_page(
     if logo_path and Path(logo_path).exists():
         paragraph = document.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        paragraph.paragraph_format.space_after = Pt(32)
-        paragraph.add_run().add_picture(str(logo_path), width=Inches(3.25))
+        paragraph.paragraph_format.space_after = Pt(18)
+        paragraph.add_run().add_picture(str(logo_path), width=Inches(1.35))
 
     kicker = document.add_paragraph()
     kicker.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -290,15 +322,15 @@ def _add_title_page(
 
     title = document.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title.paragraph_format.space_after = Pt(8)
-    title_run = title.add_run("THERMALLAB PRACTICAL REPORT")
-    _set_run_font(title_run, size=25, bold=True, colour=JCU_DARK_BLUE)
+    title.paragraph_format.space_after = Pt(7)
+    title_run = title.add_run(practical_title)
+    _set_run_font(title_run, size=27, bold=True, colour=JCU_DARK_BLUE)
 
     subtitle = document.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle.paragraph_format.space_after = Pt(28)
-    subtitle_run = subtitle.add_run(practical_title)
-    _set_run_font(subtitle_run, size=15, bold=True, colour=JCU_BLUE)
+    subtitle.paragraph_format.space_after = Pt(24)
+    subtitle_run = subtitle.add_run("Practical report and analysis record")
+    _set_run_font(subtitle_run, size=12.5, bold=True, colour=JCU_BLUE)
 
     metadata = document.add_table(rows=0, cols=2)
     metadata.style = "Table Grid"
@@ -385,6 +417,7 @@ def build_practical_report(
     sample_calculation: Iterable[str],
     evidence: Iterable[str],
     discussion_notes: Iterable[tuple[str, str]],
+    figures: Iterable[tuple[str, bytes, str]] = (),
     logo_path: str | Path | None = None,
 ) -> bytes:
     document = Document()
@@ -409,21 +442,29 @@ def build_practical_report(
     _add_raw_data(document, practical_code, raw_data)
     _add_analysis_data(document, practical_code, analysed_data)
 
-    _add_heading(document, "4. Sample calculation", 1)
+    _add_heading(document, "4. Key graphs", 1)
+    figure_items = list(figures)
+    if figure_items:
+        for figure_number, (caption, image_bytes, explanation) in enumerate(figure_items, start=1):
+            _add_figure(document, image_bytes, caption, explanation, figure_number)
+    else:
+        document.add_paragraph("No complete dataset was available for generated graphs.")
+
+    _add_heading(document, "5. Sample calculation", 1)
     if sample_calculation:
         for index, calculation in enumerate(sample_calculation, start=1):
             _add_labelled_paragraph(document, f"Step {index}", calculation)
     else:
         document.add_paragraph("No complete operating point is available for a sample calculation.")
 
-    _add_heading(document, "5. Evidence and discussion", 1)
+    _add_heading(document, "6. Evidence and discussion", 1)
     for index, statement in enumerate(evidence, start=1):
         _add_labelled_paragraph(document, f"Evidence {index}", statement)
     for index, (prompt, response) in enumerate(discussion_notes, start=1):
-        _add_heading(document, f"5.{index} {prompt}", 2)
+        _add_heading(document, f"6.{index} {prompt}", 2)
         document.add_paragraph(response or "Not completed in the app.")
 
-    _add_heading(document, "6. Conclusion and limitations", 1)
+    _add_heading(document, "7. Conclusion and limitations", 1)
     _add_callout(
         document,
         "Before submission",
@@ -434,7 +475,7 @@ def build_practical_report(
         paragraph = document.add_paragraph("Complete this section in your own words before submission.")
         for run in paragraph.runs:
             _set_run_font(run, size=10.5, italic=True, colour=MUTED)
-        for _ in range(2):
+        for _ in range(1):
             document.add_paragraph("________________________________________________________________________________")
 
     stream = BytesIO()
